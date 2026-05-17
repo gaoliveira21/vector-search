@@ -1,56 +1,145 @@
-# Vector Search Algorithm - Implementation Guide
+# Vector Search - Fraud Detection Implementation Guide
 
 ## What is Vector Search?
 
-Vector search finds similar items by comparing their vector embeddings (numerical representations) using distance metrics. It's the foundation of semantic search, recommendation systems, and AI applications.
+Vector search finds similar items by comparing their vector embeddings (numerical representations) using distance metrics. This implementation applies it to fraud detection by finding similar past transactions.
 
 ---
 
-## Step-by-Step Implementation Plan
+## Implementation Overview
 
-### Phase 1: Understanding the Core Concepts
+### Tech Stack
 
-1. **Vectors & Embeddings** - Numerical representations of data (text, images, etc.)
-2. **Distance Metrics** - How to measure similarity between vectors:
-   - **Cosine Similarity** - Angle between vectors (0 to 1)
-   - **Euclidean Distance** - Straight-line distance
-   - **Dot Product** - Projection of one vector onto another
+- **Language**: Go 1.26.2
+- **Approach**: Brute-force k-nearest neighbors search
+- **Use Case**: Fraud detection via transaction similarity
 
-### Phase 2: Data Structures
+### Core Components
 
-1. **Flat/Naive Search** - Compare query vector against ALL vectors (O(n) per query)
-2. **Indexing Structures for Speed:**
-   - **KD-Tree** - Partition space by dimensions (good for low dimensions)
-   - **Ball Tree** - Nested hyperspheres
-   - **HNSW** (Hierarchical Navigable Small World) - Graph-based, excellent for production
-
-### Phase 3: Key Algorithms to Implement (Progressive Difficulty)
-
-| Algorithm | Complexity | Use Case |
-|-----------|------------|----------|
-| Brute Force | O(n·d) per query | Baseline, small datasets |
-| KD-Tree | O(log n) avg | Low-dim (<100), exact results |
-| HNSW | O(log n) | High-dim, approximate (production) |
+1. **Transaction** → **Vector**: Normalize transaction data into 3D vectors
+2. **Distance Functions**: Euclidean, Manhattan, Cosine Similarity, Dot Product
+3. **Search**: Find k nearest neighbors in reference dataset
+4. **Scoring**: Calculate fraud probability from neighbor labels
 
 ---
 
-## Implementation Roadmap
+## Data Flow
 
-### Week 1: Basic Vector Search ✅
+```
+Transaction (Amount, Hour, CustomerAvgAmount)
+    ↓ NewVector()
+Vector [0.01, 0.08, 0.05]  (normalized, clamped to [0,1])
+    ↓ Search() with distance function
+[]SearchResult {Score, fraud}
+    ↓ Score()
+fraud_probability (0.0 to 1.0)
+```
 
-- [x] Represent vectors as arrays/lists
-- [x] Implement distance functions (cosine, euclidean, dot)
-- [x] Implement brute-force nearest neighbor search
-- [x] Test with random vectors
+---
 
-### Week 2: KD-Tree Implementation
+## Distance Metrics
+
+| Metric | Formula | Best For |
+|--------|---------|----------|
+| Euclidean | √Σ(Ai-Bi)² | General similarity |
+| Manhattan | Σ\|Ai-Bi\| | Grid-like paths |
+| Cosine Similarity | (A·B)/(\|\|A\|\|×\|\|B\|\|) | Direction similarity |
+| Dot Product | Σ(Ai×Bi) | Projection magnitude |
+
+---
+
+## Code Examples (Go)
+
+### Vector Creation
+
+```go
+type Transaction struct {
+    Amount            int
+    Hour              int
+    CustomerAvgAmount int
+}
+
+type Vector []float64
+
+func NewVector(t *Transaction) Vector {
+    return Vector{
+        clamp(float64(t.Amount)/100, 10000.0),
+        clamp(float64(t.Hour), 23.0),
+        clamp(float64(t.CustomerAvgAmount)/100, 5000.0),
+    }
+}
+```
+
+### Distance Functions
+
+```go
+func EuclideanDist(v Vector, ref Vector) float64 {
+    coordDist := 0.0
+    for i := range v {
+        coordDist += math.Pow(v[i]-ref[i], 2)
+    }
+    return roundUp(math.Sqrt(coordDist), 3)
+}
+
+func CosineSimilarity(v Vector, ref Vector) float64 {
+    dot, normV, normRef := 0.0, 0.0, 0.0
+    for i := range v {
+        dot += v[i] * ref[i]
+        normV += v[i] * v[i]
+        normRef += ref[i] * ref[i]
+    }
+    return roundUp(dot/(math.Sqrt(normV)*math.Sqrt(normRef)), 3)
+}
+```
+
+### Search & Scoring
+
+```go
+func Search(tr *Transaction, dist func(Vector, Vector) float64) []SearchResult {
+    vec := NewVector(tr)
+    result := []SearchResult{}
+    for _, v := range ds {
+        score := dist(vec, v.Vector)
+        result = append(result, SearchResult{Score: score, fraud: v.Label == "fraud"})
+    }
+    sort.Slice(result, func(i, j int) bool {
+        return result[i].Score < result[j].Score
+    })
+    return result
+}
+
+func Score(sr []SearchResult) float64 {
+    fraud := 0
+    for _, v := range sr[:3] {
+        if v.fraud {
+            fraud++
+        }
+    }
+    return float64(fraud) / 3.0
+}
+```
+
+---
+
+## Running the Code
+
+```bash
+go run vector_search.go
+go test -v
+```
+
+---
+
+## Extending the Implementation
+
+### Phase 2: KD-Tree
 
 - [ ] Build tree by splitting on median (alternating dimensions)
 - [ ] Implement insert and search
 - [ ] Handle approximate nearest neighbors
 - [ ] Compare performance vs brute force
 
-### Week 3: HNSW Introduction (Advanced)
+### Phase 3: HNSW (Production-Ready)
 
 - [ ] Understand skip lists concept
 - [ ] Implement layered graph structure
@@ -59,96 +148,17 @@ Vector search finds similar items by comparing their vector embeddings (numerica
 
 ---
 
-## Essential Information
+## When to Use Each Approach
 
-### When to Use Each Approach
-
-- **Brute Force**: Dataset < 10,000 vectors, need exact results
+- **Brute Force (current)**: Dataset < 10,000 vectors, need exact results
 - **KD-Tree**: Dataset < 1M, dimensions < 50, exact results
-- **HNSW/Annoy/FAISS**: Millions of vectors, dimensions > 50, approximate results
-
-### Key Trade-offs
-
-| Approach | Speed | Accuracy | Memory |
-|----------|-------|----------|--------|
-| Brute Force | Slow | 100% | Low |
-| KD-Tree | Fast | 100% | Medium |
-| HNSW | Very Fast | 95-99% | Higher |
-
----
-
-## Recommended Tools for Learning
-
-1. **NumPy** - For vector operations (Python)
-2. **scikit-learn** - For understanding KD-Trees and Ball Trees
-3. **FAISS** (Facebook) - For production-grade approximate search
-4. **Annoy** (Spotify) - Simpler HNSW-like implementation
-
----
-
-## Suggested First Exercise
-
-Start with a simple implementation:
-
-1. Generate 1000 random 2D/3D vectors
-2. Implement cosine distance function
-3. Write brute-force search to find top-5 nearest neighbors
-4. Visualize the results to understand the algorithm intuitively
-
----
-
-## Mathematical Foundations
-
-### Cosine Similarity
-
-```
-cosine_similarity(A, B) = (A · B) / (||A|| × ||B||)
-```
-
-Ranges from -1 (opposite) to 1 (identical), where 0 means orthogonal.
-
-### Euclidean Distance
-
-```
-euclidean(A, B) = sqrt(Σ(Ai - Bi)²)
-```
-
-The straight-line distance between two points in n-dimensional space.
-
-### Dot Product
-
-```
-dot(A, B) = Σ(Ai × Bi)
-```
-
-Measures how much one vector extends in the direction of another.
-
----
-
-## Code Skeleton (Python)
-
-```python
-import numpy as np
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-def euclidean_distance(a: np.ndarray, b: np.ndarray) -> float:
-    return np.linalg.norm(a - b)
-
-def brute_force_search(query: np.ndarray, vectors: list[np.ndarray], k: int = 5):
-    distances = [(i, euclidean_distance(query, v)) for i, v in enumerate(vectors)]
-    distances.sort(key=lambda x: x[1])
-    return distances[:k]
-```
+- **HNSW**: Millions of vectors, dimensions > 50, approximate results (production)
 
 ---
 
 ## Next Steps
 
-Once you're comfortable with the basics, explore:
-
-1. **Dimensionality Reduction** - PCA, t-SNE, UMAP for visualization
-2. **Approximate Nearest Neighbors** - HNSW, IVF, product quantization
-3. **Production Systems** - FAISS, Milvus, Pinecone, Weaviate
-4. **Hybrid Search** - Combining vector and keyword search
+1. **Add more reference data** to improve detection accuracy
+2. **Implement KD-Tree** for faster searches with larger datasets
+3. **Add more distance metrics** (Mahalanobis, Jaccard)
+4. **Explore dimensionality reduction** for higher-dimensional data
